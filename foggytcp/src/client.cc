@@ -10,6 +10,7 @@ from releasing their forks in any public places. */
 #include <unistd.h>
 #include <fstream>
 #include <iostream>
+#include <cstring>
 using namespace std;
 
 #include "foggy_tcp.h"
@@ -35,6 +36,7 @@ int main(int argc, const char* argv[]) {
   const char* server_ip = argv[1];
   const char* server_port = argv[2];
   const char* filename = argv[3];
+  struct timespec start_time;
 
   /* Create an initiator socket */
   void* sock = foggy_socket(TCP_INITIATOR, server_port, server_ip);
@@ -50,36 +52,46 @@ int main(int argc, const char* argv[]) {
   /* Wait for one second to ensure the socket is up */
   sleep(1);
 
-  struct timespec start_time;
-  timespec_get(&start_time, TIME_UTC);
-
   char buf[BUF_SIZE];
+  bool first_packet = true;
+  
   while (ifs) {
     /* Read data from the file into the buffer. The amount of data read is
      * stored in bytes_read */
     ifs.read(buf, BUF_SIZE);
     int bytes_read = ifs.gcount();
 
-    /* Write the data in the buffer to the socket. If an error occurs, print an
-     * error message and return -1 */
-    int bytes_written = foggy_write(sock, buf, bytes_read);
-    if (bytes_written < 0) {
-      cerr << "Error: Write failed\n";
-      return -1;
+    if (first_packet && bytes_read > 0) {
+      timespec_get(&start_time, TIME_UTC);
+      
+      /* Insert timestamp into first packet */
+      char timestamped_buf[BUF_SIZE + sizeof(struct timespec)];
+      memcpy(timestamped_buf, &start_time, sizeof(start_time));
+      memcpy(timestamped_buf + sizeof(start_time), buf, bytes_read);
+      
+      /* Write timestamped first packet */
+      int bytes_written = foggy_write(sock, timestamped_buf, bytes_read + sizeof(start_time));
+      if (bytes_written < 0) {
+        cerr << "Error: Write failed\n";
+        return -1;
+      }
+      first_packet = false;
+      continue;
+    }
+
+    if (bytes_read > 0) {
+      int bytes_written = foggy_write(sock, buf, bytes_read);
+      if (bytes_written < 0) {
+        cerr << "Error: Write failed\n";
+        return -1;
+      }
     }
   }
 
   /* Close the socket and the output file void convert */
   foggy_close(sock);
   ifs.close();
-
-  struct timespec end_time;
-  timespec_get(&end_time, TIME_UTC);
-
-  /* Calculate the transmission time in milliseconds */
-  time_t transmission_time = (end_time.tv_sec - start_time.tv_sec) * 1000 +
-                             (end_time.tv_nsec - start_time.tv_nsec) / 1000000;
-  cout << "Transmission took " << transmission_time << " ms\n";
+  cout << "Client: File transmission completed\n";
 
   return 0;
 }
