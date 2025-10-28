@@ -41,3 +41,6 @@ void process_receive_window(foggy_socket_t *sock);
 void transmit_send_window(foggy_socket_t *sock);
 
 void receive_send_window(foggy_socket_t *sock);
+
+void handle_congestion_window(foggy_socket_t *sock, uint8_t *pkt);
+void handle_fast_retransmit(foggy_socket_t *sock);

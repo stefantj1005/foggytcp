@@ -130,7 +130,7 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
           sock->my_port, ntohs(sock->conn.sin_port),
           sock->window.last_byte_sent, sock->window.next_seq_expected,
           sizeof(foggy_tcp_header_t), sizeof(foggy_tcp_header_t) + payload_len,
-          ACK_FLAG_MASK,
+          0,  // ← CHANGED FROM ACK_FLAG_MASK TO 0 (no flags for data packets)
           MAX(MAX_NETWORK_BUFFER - (uint32_t)sock->received_len, MSS), 0, NULL,
           data_offset, payload_len);
       
@@ -149,8 +149,7 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
   // Now transmit as many packets as the window allows
   transmit_send_window(sock);
 }
-
-
+  
 void add_receive_window(foggy_socket_t *sock, uint8_t *pkt) {
   foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)pkt;
   uint32_t seq_num = get_seq(hdr);
@@ -295,17 +294,58 @@ void receive_send_window(foggy_socket_t *sock) {
     free(slot.msg);
   }
 }
-/*
+
 // Congestion control placeholder functions - you need to implement these
 void handle_congestion_window(foggy_socket_t *sock, uint8_t *pkt) {
   // TODO: Implement TCP Reno congestion control
   // Update cwnd based on current state (slow start, congestion avoidance)
   // This function is called when a new ACK is received
+  switch (sock->window.reno_state) {
+    case RENO_SLOW_START:
+      sock->window.congestion_window += MSS;
+      if (sock->window.congestion_window >= sock->window.ssthresh) {
+          sock->window.reno_state = RENO_CONGESTION_AVOIDANCE;
+          debug_printf("Transition to Congestion Avoidance: cwnd=%d, ssthresh=%d\n", sock->window.congestion_window, sock->window.ssthresh);
+      }
+      break;
+    case RENO_CONGESTION_AVOIDANCE:
+        sock->window.congestion_window += (MSS * MSS) / sock->window.congestion_window;
+        break;
+    case RENO_FAST_RECOVERY:
+        sock->window.congestion_window = sock->window.ssthresh;
+        sock->window.reno_state = RENO_CONGESTION_AVOIDANCE;
+        sock->window.dup_ack_count = 0;
+        debug_printf("Exiting Fast Recovery: cwnd=%d\n", sock->window.congestion_window);
+        break;
+    }
+    debug_printf("Congestion Control: state=%d, cwnd=%d, ssthresh=%d\n",sock->window.reno_state, sock->window.congestion_window, sock->window.ssthresh);
 }
 
 void handle_fast_retransmit(foggy_socket_t *sock) {
   // TODO: Implement fast retransmit
   // This function is called when 3 duplicate ACKs are received
   // Should retransmit the lost packet and adjust congestion control state
+  debug_printf("Fast Retransmit: 3 duplicate ACKs received\n");
+    
+    // Set ssthresh and cwnd for fast recovery
+  sock->window.ssthresh = MAX(sock->window.congestion_window / 2, 2 * MSS);
+  sock->window.congestion_window = sock->window.ssthresh + 3 * MSS;
+  sock->window.reno_state = RENO_FAST_RECOVERY;
+    
+  debug_printf("Fast Recovery: ssthresh=%d, cwnd=%d\n",
+                 sock->window.ssthresh, sock->window.congestion_window);
+    
+    // Retransmit the lost packet (first unACKed packet in send window)
+  if (!sock->send_window.empty()) {
+    for (auto& slot : sock->send_window) {
+      foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)slot.msg;
+      if (!has_been_acked(sock, get_seq(hdr))) {
+        // Found the first unACKed packet - retransmit it
+        debug_printf("Retransmitting lost packet: seq=%d\n", get_seq(hdr));
+        sendto(sock->socket, slot.msg, get_plen(hdr), 0,
+                (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
+        break;
+      }
+    }
+  }
 }
-*/
