@@ -295,7 +295,7 @@ void receive_send_window(foggy_socket_t *sock) {
     free(slot.msg);
   }
 }
-
+/*
 // Congestion control placeholder functions - you need to implement these
 void handle_congestion_window(foggy_socket_t *sock, uint8_t *pkt) {
   // TODO: Implement TCP Reno congestion control
@@ -308,3 +308,4 @@ void handle_fast_retransmit(foggy_socket_t *sock) {
   // This function is called when 3 duplicate ACKs are received
   // Should retransmit the lost packet and adjust congestion control state
 }
+*/
