@@ -22,7 +22,7 @@ from releasing their forks in any public places. */
 #define DEBUG_PRINT 1
 #define debug_printf(fmt, ...)                            \
   do {                                                    \
-    if (DEBUG_PRINT) fprintf(stdout, fmt, ##_VA_ARGS_); \
+    if (DEBUG_PRINT) fprintf(stdout, fmt, ##__VA_ARGS__); \
   } while (0)
 
 
