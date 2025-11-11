@@ -20,8 +20,18 @@ from releasing their forks in any public places. */
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <time.h>          // <<< CP3
 
 #include "foggy_backend.h"
+
+/* CP3 ------------------------------------------------ */
+/* helper: current time in ms */
+static uint64_t now_ms() {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1000ULL + t.tv_nsec / 1000000ULL;
+}
+/* ---------------------------------------------------- */
 
 void* foggy_socket(const foggy_socket_type_t socket_type,
                const char *server_port, const char *server_ip) {
@@ -37,7 +47,6 @@ void* foggy_socket(const foggy_socket_type_t socket_type,
     return NULL;
   }
   sock->socket = sockfd;
-  // sock->state = CLOSED;
   sock->received_buf = NULL;
   sock->received_len = 0;
   pthread_mutex_init(&(sock->recv_lock), NULL);
@@ -50,9 +59,6 @@ void* foggy_socket(const foggy_socket_type_t socket_type,
   sock->dying = 0;
   pthread_mutex_init(&(sock->death_lock), NULL);
 
-  // FIXME: Sequence numbers should be randomly initialized. The next expected
-  // sequence number should be initialized according to the SYN packet from the
-  // other side of the connection.
   sock->window.last_byte_sent = 0;
   sock->window.last_ack_received = 0;
   sock->window.dup_ack_count = 0;
@@ -73,6 +79,11 @@ void* foggy_socket(const foggy_socket_type_t socket_type,
     return NULL;
   }
 
+  /* CP3 ------------------------------------------------ */
+  sock->outstanding = 0;
+  clock_gettime(CLOCK_MONOTONIC, &sock->last_send_time);
+  /* ---------------------------------------------------- */
+
   uint16_t portno = (uint16_t)atoi(server_port);
   switch (socket_type) {
     case TCP_INITIATOR:
@@ -81,7 +92,6 @@ void* foggy_socket(const foggy_socket_type_t socket_type,
         return NULL;
       }
       memset(&conn, 0, sizeof(conn));
-      
       conn.sin_family = AF_INET;
       conn.sin_addr.s_addr = inet_addr(server_ip);
       conn.sin_port = htons(portno);
@@ -94,7 +104,6 @@ void* foggy_socket(const foggy_socket_type_t socket_type,
         perror("ERROR on binding");
         return NULL;
       }
-
       break;
 
     case TCP_LISTENER:

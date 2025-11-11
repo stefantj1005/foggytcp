@@ -12,7 +12,11 @@ from releasing their forks in any public places. */
 
 #ifndef FOGGY_TCP_H_
 #define FOGGY_TCP_H_
-
+#define RTT_ALPHA 0.125
+#define RTT_BETA  0.25
+#define RTT_MIN_TIMEOUT 200        // ms
+#define RTT_MAX_TIMEOUT 5000       // ms
+#define DUP_ACK_THRESHOLD 3
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -96,6 +100,8 @@ struct foggy_socket_t {
   int dying;
   pthread_mutex_t death_lock;
   window_t window;
+  uint32_t outstanding;          // bytes in flight
+  struct timespec last_send_time;
 
   /* <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< */
   deque<send_window_slot_t> send_window;

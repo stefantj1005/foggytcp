@@ -8,7 +8,8 @@ the express permission of the course staff. Everyone is prohibited
 from releasing their forks in any public places. */
 
 #include "foggy_tcp.h"
-
+#ifndef FOGGY_FUNCTION_H_
+#define FOGGY_FUNCTION_H_
 /**
  * Updates the socket information to represent the newly received packet.
  *
@@ -32,7 +33,7 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt);
  */
 void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len);
 
-/*<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<</
 
 void add_receive_window(foggy_socket_t *sock, uint8_t *pkt);
 
@@ -41,3 +42,8 @@ void process_receive_window(foggy_socket_t *sock);
 void transmit_send_window(foggy_socket_t *sock);
 
 void receive_send_window(foggy_socket_t *sock);
+
+void handle_new_ack(foggy_socket_t *sock, uint32_t ack);
+void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack);
+
+#endif  // FOGGY_FUNCTION_H_
