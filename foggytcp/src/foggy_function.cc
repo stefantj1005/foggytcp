@@ -236,81 +236,32 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
   transmit_send_window(sock);
 }
 
-/**
- * FIXED: Add packet to receive window - handles out-of-order packets properly
- */
+// KEEP ALL YOUR EXISTING FUNCTIONS EXACTLY AS THEY WERE:
 void add_receive_window(foggy_socket_t *sock, uint8_t *pkt) {
   foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)pkt;
-  uint32_t seq = get_seq(hdr);
-  
-  // Check if this packet is already in the receive window
-  for (int i = 0; i < WINDOW_SIZE; i++) {
-    if (sock->receive_window[i].is_used) {
-      foggy_tcp_header_t *existing_hdr = (foggy_tcp_header_t *)sock->receive_window[i].msg;
-      if (get_seq(existing_hdr) == seq) {
-        debug_printf("Packet %d already in receive window, ignoring duplicate\n", seq);
-        return;  // Duplicate packet, ignore
-      }
-    }
+  receive_window_slot_t *cur_slot = &(sock->receive_window[0]);
+  if (cur_slot->is_used == 0) {
+    cur_slot->is_used = 1;
+    cur_slot->msg = (uint8_t*) malloc(get_plen(hdr));
+    memcpy(cur_slot->msg, pkt, get_plen(hdr));
   }
-  
-  // Find an empty slot
-  for (int i = 0; i < WINDOW_SIZE; i++) {
-    if (sock->receive_window[i].is_used == 0) {
-      sock->receive_window[i].is_used = 1;
-      sock->receive_window[i].msg = (uint8_t*)malloc(get_plen(hdr));
-      memcpy(sock->receive_window[i].msg, pkt, get_plen(hdr));
-      debug_printf("Added packet %d to receive window slot %d\n", seq, i);
-      return;
-    }
-  }
-  
-  debug_printf("WARNING: Receive window full, dropping packet %d\n", seq);
 }
 
-/**
- * FIXED: Process receive window - handles out-of-order delivery
- */
 void process_receive_window(foggy_socket_t *sock) {
-  // Keep processing packets in order until we hit a gap
-  while (1) {
-    int found = 0;
-    
-    // Look for the next expected packet in the receive window
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-      if (sock->receive_window[i].is_used) {
-        foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)sock->receive_window[i].msg;
-        uint32_t seq = get_seq(hdr);
-        
-        if (seq == sock->window.next_seq_expected) {
-          // Found the next packet in sequence
-          uint16_t payload_len = get_payload_len(sock->receive_window[i].msg);
-          
-          debug_printf("Processing in-order packet %d (len=%d)\n", seq, payload_len);
-          
-          // Update next expected sequence number
-          sock->window.next_seq_expected += payload_len;
-          
-          // Append payload to received buffer
-          sock->received_buf = (uint8_t*)realloc(sock->received_buf, sock->received_len + payload_len);
-          memcpy(sock->received_buf + sock->received_len, 
-                 get_payload(sock->receive_window[i].msg), payload_len);
-          sock->received_len += payload_len;
-          
-          // Free the slot
-          free(sock->receive_window[i].msg);
-          sock->receive_window[i].msg = NULL;
-          sock->receive_window[i].is_used = 0;
-          
-          found = 1;
-          break;  // Start over to find next packet
-        }
-      }
-    }
-    
-    if (!found) {
-      break;  // No more consecutive packets found
-    }
+  receive_window_slot_t *cur_slot = &(sock->receive_window[0]);
+  if (cur_slot->is_used != 0) {
+    foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)cur_slot->msg;
+    if (get_seq(hdr) != sock->window.next_seq_expected) return;
+    uint16_t payload_len = get_payload_len(cur_slot->msg);
+    sock->window.next_seq_expected += payload_len;
+    sock->received_buf = (uint8_t*)
+        realloc(sock->received_buf, sock->received_len + payload_len);
+    memcpy(sock->received_buf + sock->received_len, get_payload(cur_slot->msg),
+           payload_len);
+    sock->received_len += payload_len;
+    cur_slot->is_used = 0;
+    free(cur_slot->msg);
+    cur_slot->msg = NULL;
   }
 }
 
@@ -366,3 +317,6 @@ void receive_send_window(foggy_socket_t *sock) {
     free(slot.msg);
   }
 }
+
+//this is the correct one kaowkaowka
+
