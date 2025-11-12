@@ -86,7 +86,7 @@ void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
       
       debug_printf("Fast recovery: SSTHRESH=%d, CWND=%d\n", 
                    sock->window.ssthresh, sock->window.congestion_window);
-      //break;
+      break;
     }
   }
 }
@@ -101,10 +101,12 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
 
   // ALWAYS update advertised window from EVERY packet
   uint16_t new_advertised_window = get_advertised_window(hdr);
+  int window_changed = 0;
   if (new_advertised_window != sock->window.advertised_window) {
     debug_printf("Advertised window changed: %d -> %d\n", 
                  sock->window.advertised_window, new_advertised_window);
     sock->window.advertised_window = new_advertised_window;
+    window_changed = 1;
   }
 
   if (flags == ACK_FLAG_MASK) {
@@ -142,7 +144,7 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
       receive_send_window(sock);
     }
     
-    // ALWAYS try to send more data after processing any ACK
+    // ALWAYS try to send more data after processing any ACK or window update
     transmit_send_window(sock);
   } 
   
@@ -168,6 +170,11 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
            (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
     free(ack_pkt);
   }
+  
+  // If window changed but wasn't an ACK-only packet, still try to transmit
+  if (window_changed && flags != ACK_FLAG_MASK) {
+    transmit_send_window(sock);
+  }
 }
 
 /**
@@ -175,10 +182,13 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
  */
 void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
   uint8_t *data_offset = data;
-   if (sock->window.ssthresh == 0) {
+  
+  // Initialize ssthresh if not already set
+  if (sock->window.ssthresh == 0) {
     sock->window.ssthresh = 65535;  // Large value to allow full slow start
     debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
   }
+  
   // First, process any ACKs we've received to free up window space
   receive_send_window(sock);
   
@@ -239,7 +249,6 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
   transmit_send_window(sock);
 }
 
-// KEEP ALL YOUR EXISTING FUNCTIONS EXACTLY AS THEY WERE:
 void add_receive_window(foggy_socket_t *sock, uint8_t *pkt) {
   foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)pkt;
   receive_window_slot_t *cur_slot = &(sock->receive_window[0]);
@@ -320,5 +329,3 @@ void receive_send_window(foggy_socket_t *sock) {
     free(slot.msg);
   }
 }
-
-//this is the correct one kaowkaowka
