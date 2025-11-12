@@ -295,6 +295,10 @@ void transmit_send_window(foggy_socket_t *sock) {
                sock->window.congestion_window, sock->window.advertised_window,
                effective_window, bytes_in_flight);
 
+  // ADD BURST LIMIT
+  uint32_t packets_sent_this_burst = 0;
+  uint32_t max_burst_packets = 10;
+  
   for (auto& slot : sock->send_window) {
     foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)slot.msg;
     uint32_t packet_seq = get_seq(hdr);
@@ -302,11 +306,18 @@ void transmit_send_window(foggy_socket_t *sock) {
     if (!slot.is_sent) {
       // Check if we have window space for this packet
       if (bytes_in_flight + get_payload_len(slot.msg) <= effective_window) {
+        // Check burst limit
+        if (packets_sent_this_burst >= max_burst_packets) {
+          debug_printf("Burst limit reached (%d packets), pausing transmission\n", max_burst_packets);
+          break;
+        }
+        
         debug_printf("Sending packet %d\n", packet_seq);
         slot.is_sent = 1;
         sendto(sock->socket, slot.msg, get_plen(hdr), 0,
                (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
         bytes_in_flight += get_payload_len(slot.msg);
+        packets_sent_this_burst++;
       } else {
         debug_printf("Window full, cannot send packet %d\n", packet_seq);
         break;
