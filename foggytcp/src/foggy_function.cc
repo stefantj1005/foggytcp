@@ -70,7 +70,7 @@ void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
   
   // UPDATE CONGESTION CONTROL ONLY ONCE
   sock->window.ssthresh = MAX(sock->window.congestion_window / 2, 2 * MSS);
-  sock->window.congestion_window = sock->window.ssthresh + 3 * MSS;
+  sock->window.congestion_window = sock->window.ssthresh;
   sock->window.reno_state = RENO_FAST_RECOVERY;
   
   debug_printf("Fast recovery: SSTHRESH=%d, CWND=%d\n", 
