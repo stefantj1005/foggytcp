@@ -75,18 +75,18 @@ void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
     
     // Retransmit the oldest unACKed packet (first one we find)
     if (!has_been_acked(sock, packet_seq)) {
-      debug_printf("Fast retransmit packet %d\n", packet_seq);
-      sendto(sock->socket, slot.msg, get_plen(hdr), 0,
-             (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
-      
-      // CORRECT TCP RENO: Set ssthresh to max(cwnd/2, 2*MSS) and cwnd to ssthresh + 3*MSS
-      sock->window.ssthresh = MAX(sock->window.congestion_window / 2, 2 * MSS);
-      sock->window.congestion_window = sock->window.ssthresh + 3 * MSS;
-      sock->window.reno_state = RENO_FAST_RECOVERY;
-      
-      debug_printf("Fast recovery: SSTHRESH=%d, CWND=%d\n", 
-                   sock->window.ssthresh, sock->window.congestion_window);
-      //break;
+        debug_printf("Fast retransmit packet %d\n", packet_seq);
+        sendto(sock->socket, slot.msg, get_plen(hdr), 0,
+               (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
+        
+        // THIS GETS EXECUTED FOR EVERY LOST PACKET!
+        sock->window.ssthresh = MAX(sock->window.congestion_window / 2, 2 * MSS);
+        sock->window.congestion_window = sock->window.ssthresh + 3 * MSS;
+        sock->window.reno_state = RENO_FAST_RECOVERY;
+        
+        debug_printf("Fast recovery: SSTHRESH=%d, CWND=%d\n", 
+                     sock->window.ssthresh, sock->window.congestion_window);
+        //break;
     }
   }
 }
