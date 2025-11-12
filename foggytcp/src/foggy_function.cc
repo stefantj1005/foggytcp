@@ -340,5 +340,3 @@ void receive_send_window(foggy_socket_t *sock) {
     free(slot.msg);
   }
 }
-
-//this is the correct version;cd
