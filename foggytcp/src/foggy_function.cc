@@ -174,8 +174,15 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
  * Send packets with flow and congestion control
  */
 void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
+   if (sock->window.ssthresh == 0) {
+    sock->window.ssthresh = 65535;  // Large value to allow full slow start
+    debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
+  }
   uint8_t *data_offset = data;
-  
+   if (sock->window.ssthresh == 0) {
+    sock->window.ssthresh = 65535;  // Large value to allow full slow start
+    debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
+  }
   // First, process any ACKs we've received to free up window space
   receive_send_window(sock);
   
