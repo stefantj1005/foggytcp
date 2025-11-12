@@ -37,14 +37,21 @@ void handle_new_ack(foggy_socket_t *sock, uint32_t ack) {
   // Normal congestion window updates
   switch (sock->window.reno_state) {
     case RENO_SLOW_START:
-      // Slow start: increase CWND by 1 MSS per ACK
-      sock->window.congestion_window += MSS;
-      debug_printf("Slow start: CWND increased from %d to %d\n", 
-                   sock->window.congestion_window - MSS, sock->window.congestion_window);
+      // LESS AGGRESSIVE SLOW START: Only increase every 2nd ACK
+      static int ack_counter = 0;
+      ack_counter++;
+      if (ack_counter % 2 == 0) {  // Increase CWND only on every 2nd ACK
+        sock->window.congestion_window += MSS;
+        debug_printf("Conservative slow start: CWND increased from %d to %d (ACK count: %d)\n", 
+                     sock->window.congestion_window - MSS, sock->window.congestion_window, ack_counter);
+      } else {
+        debug_printf("Conservative slow start: Skipping CWND increase (ACK count: %d)\n", ack_counter);
+      }
       
       // Check if we should transition to congestion avoidance
       if (sock->window.congestion_window >= sock->window.ssthresh) {
         sock->window.reno_state = RENO_CONGESTION_AVOIDANCE;
+        ack_counter = 0;  // Reset counter for next slow start
         debug_printf("Transition to congestion avoidance, CWND=%d >= SSTHRESH=%d\n",
                      sock->window.congestion_window, sock->window.ssthresh);
       }
@@ -317,5 +324,3 @@ void receive_send_window(foggy_socket_t *sock) {
     free(slot.msg);
   }
 }
-
-//this is the correct one kaowkaowka
