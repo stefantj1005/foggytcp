@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <sys/time.h>
 
 #include "foggy_function.h"
 #include "foggy_backend.h"
@@ -17,6 +18,61 @@
 
 // TCP Reno constants
 #define DUP_ACK_THRESHOLD 3
+#define INITIAL_RTO_MS 1000
+#define MIN_RTO_MS 200
+#define MAX_RTO_MS 60000
+#define RTO_ALPHA 0.125
+#define RTO_BETA 0.25
+
+// Extended send window slot with timeout tracking
+struct send_window_slot_extended_t {
+  uint8_t is_sent;
+  uint8_t is_rtt_sample;
+  uint8_t *msg;
+  struct timeval send_time;
+  int retransmit_count;
+};
+
+// Buffer for data that couldn't be sent due to window constraints
+struct pending_data_t {
+  uint8_t *data;
+  size_t len;
+  size_t offset;
+};
+
+static pending_data_t pending_buffer = {NULL, 0, 0};
+static std::deque<send_window_slot_extended_t> extended_send_window;
+static int current_rto_ms = INITIAL_RTO_MS;
+static int srtt_ms = 0;
+static int rttvar_ms = 0;
+static bool rtt_initialized = false;
+
+/**
+ * Get current time in milliseconds
+ */
+static long get_time_ms(struct timeval *tv) {
+  return tv->tv_sec * 1000 + tv->tv_usec / 1000;
+}
+
+/**
+ * Update RTO based on RTT sample
+ */
+static void update_rto(int rtt_ms) {
+  if (!rtt_initialized) {
+    srtt_ms = rtt_ms;
+    rttvar_ms = rtt_ms / 2;
+    rtt_initialized = true;
+  } else {
+    rttvar_ms = (int)((1 - RTO_BETA) * rttvar_ms + RTO_BETA * abs(srtt_ms - rtt_ms));
+    srtt_ms = (int)((1 - RTO_ALPHA) * srtt_ms + RTO_ALPHA * rtt_ms);
+  }
+  
+  current_rto_ms = srtt_ms + MAX(1, 4 * rttvar_ms);
+  current_rto_ms = MAX(MIN_RTO_MS, MIN(current_rto_ms, MAX_RTO_MS));
+  
+  debug_printf("RTT sample: %d ms, SRTT: %d ms, RTTVAR: %d ms, RTO: %d ms\n",
+               rtt_ms, srtt_ms, rttvar_ms, current_rto_ms);
+}
 
 /**
  * Handle new ACK - update congestion control state
@@ -24,6 +80,27 @@
 void handle_new_ack(foggy_socket_t *sock, uint32_t ack) {
   debug_printf("New ACK %d received, current state: %d, CWND: %d, SSTHRESH: %d\n", 
                ack, sock->window.reno_state, sock->window.congestion_window, sock->window.ssthresh);
+  
+  // Calculate RTT for packets being ACKed
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  
+  for (auto& slot : extended_send_window) {
+    foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)slot.msg;
+    uint32_t packet_seq = get_seq(hdr);
+    uint32_t packet_end = packet_seq + get_payload_len(slot.msg);
+    
+    // If this packet is being ACKed and we can use it for RTT sample
+    if (slot.is_rtt_sample && slot.retransmit_count == 0 && 
+        after(ack, packet_seq) && !after(ack, packet_end)) {
+      long rtt_ms = get_time_ms(&now) - get_time_ms(&slot.send_time);
+      if (rtt_ms > 0) {
+        update_rto((int)rtt_ms);
+      }
+      slot.is_rtt_sample = 0;  // Only use once
+      break;
+    }
+  }
   
   // If in fast recovery and we get a new ACK, exit fast recovery
   if (sock->window.reno_state == RENO_FAST_RECOVERY) {
@@ -37,21 +114,13 @@ void handle_new_ack(foggy_socket_t *sock, uint32_t ack) {
   // Normal congestion window updates
   switch (sock->window.reno_state) {
     case RENO_SLOW_START:
-      // LESS AGGRESSIVE SLOW START: Only increase every 2nd ACK
-      static int ack_counter = 0;
-      ack_counter++;
-      if (ack_counter % 2 == 0) {  // Increase CWND only on every 2nd ACK
-        sock->window.congestion_window += MSS;
-        debug_printf("Conservative slow start: CWND increased from %d to %d (ACK count: %d)\n", 
-                     sock->window.congestion_window - MSS, sock->window.congestion_window, ack_counter);
-      } else {
-        debug_printf("Conservative slow start: Skipping CWND increase (ACK count: %d)\n", ack_counter);
-      }
+      // Slow start: increase CWND by 1 MSS per ACK
+      sock->window.congestion_window += MSS;
+      debug_printf("Slow start: CWND increased to %d\n", sock->window.congestion_window);
       
       // Check if we should transition to congestion avoidance
       if (sock->window.congestion_window >= sock->window.ssthresh) {
         sock->window.reno_state = RENO_CONGESTION_AVOIDANCE;
-        ack_counter = 0;  // Reset counter for next slow start
         debug_printf("Transition to congestion avoidance, CWND=%d >= SSTHRESH=%d\n",
                      sock->window.congestion_window, sock->window.ssthresh);
       }
@@ -70,13 +139,65 @@ void handle_new_ack(foggy_socket_t *sock, uint32_t ack) {
 }
 
 /**
+ * Handle timeout - retransmit and reset congestion control
+ */
+void handle_timeout(foggy_socket_t *sock, send_window_slot_extended_t &slot) {
+  foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)slot.msg;
+  uint32_t packet_seq = get_seq(hdr);
+  
+  debug_printf("TIMEOUT on packet %d (retransmit #%d)\n", packet_seq, slot.retransmit_count + 1);
+  
+  // Retransmit the packet
+  sendto(sock->socket, slot.msg, get_plen(hdr), 0,
+         (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
+  
+  // Update timestamp and retransmit count
+  gettimeofday(&slot.send_time, NULL);
+  slot.retransmit_count++;
+  slot.is_rtt_sample = 0;  // Can't use retransmitted packets for RTT
+  
+  // On timeout, reset congestion control to slow start
+  sock->window.ssthresh = MAX(sock->window.congestion_window / 2, 2 * MSS);
+  sock->window.congestion_window = MSS;
+  sock->window.reno_state = RENO_SLOW_START;
+  sock->window.dup_ack_count = 0;
+  
+  // Exponential backoff on RTO
+  current_rto_ms = MIN(current_rto_ms * 2, MAX_RTO_MS);
+  
+  debug_printf("Timeout recovery: SSTHRESH=%d, CWND=%d, RTO=%d ms\n", 
+               sock->window.ssthresh, sock->window.congestion_window, current_rto_ms);
+}
+
+/**
+ * Check for timeouts and retransmit if necessary
+ */
+void check_timeouts(foggy_socket_t *sock) {
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  long now_ms = get_time_ms(&now);
+  
+  for (auto& slot : extended_send_window) {
+    if (slot.is_sent && !has_been_acked(sock, get_seq((foggy_tcp_header_t*)slot.msg))) {
+      long elapsed_ms = now_ms - get_time_ms(&slot.send_time);
+      
+      if (elapsed_ms > current_rto_ms) {
+        handle_timeout(sock, slot);
+        // Only handle one timeout per check to avoid overwhelming the network
+        break;
+      }
+    }
+  }
+}
+
+/**
  * Handle fast retransmit on 3 duplicate ACKs
  */
 void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
   debug_printf("Fast retransmit triggered with ACK %d\n", ack);
   
   // Find the first unACKed packet and retransmit it
-  for (auto& slot : sock->send_window) {
+  for (auto& slot : extended_send_window) {
     foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)slot.msg;
     uint32_t packet_seq = get_seq(hdr);
     
@@ -85,6 +206,11 @@ void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
       debug_printf("Fast retransmit packet %d\n", packet_seq);
       sendto(sock->socket, slot.msg, get_plen(hdr), 0,
              (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
+      
+      // Update timestamp but don't use for RTT
+      gettimeofday(&slot.send_time, NULL);
+      slot.retransmit_count++;
+      slot.is_rtt_sample = 0;
       
       // CORRECT TCP RENO: Set ssthresh to max(cwnd/2, 2*MSS) and cwnd to ssthresh + 3*MSS
       sock->window.ssthresh = MAX(sock->window.congestion_window / 2, 2 * MSS);
@@ -149,8 +275,18 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
       receive_send_window(sock);
     }
     
+    // Check for timeouts
+    check_timeouts(sock);
+    
     // ALWAYS try to send more data after processing any ACK
     transmit_send_window(sock);
+    
+    // Try to send pending buffered data if window opened up
+    if (pending_buffer.data != NULL && pending_buffer.offset < pending_buffer.len) {
+      debug_printf("Attempting to send pending buffered data\n");
+      size_t remaining = pending_buffer.len - pending_buffer.offset;
+      send_pkts(sock, pending_buffer.data + pending_buffer.offset, remaining);
+    }
   } 
   
   // Handle data packets (with payload)
@@ -196,7 +332,7 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
       
       // Calculate bytes in flight
       uint32_t bytes_in_flight = 0;
-      for (const auto& slot : sock->send_window) {
+      for (const auto& slot : extended_send_window) {
         if (slot.is_sent && !has_been_acked(sock, get_seq((foggy_tcp_header_t*)slot.msg))) {
           bytes_in_flight += get_payload_len(slot.msg);
         }
@@ -204,21 +340,55 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
       
       // Check if we have window space available
       if (bytes_in_flight >= effective_window) {
-        debug_printf("Window full: in_flight=%d, effective_window=%d, cannot send more data\n",
+        debug_printf("Window full: in_flight=%d, effective_window=%d, buffering remaining data\n",
                      bytes_in_flight, effective_window);
+        
+        // Buffer the remaining data for later transmission
+        size_t remaining = buf_len;
+        if (pending_buffer.data == NULL) {
+          pending_buffer.data = (uint8_t*)malloc(remaining);
+          pending_buffer.len = remaining;
+          pending_buffer.offset = 0;
+          memcpy(pending_buffer.data, data_offset, remaining);
+        } else {
+          // Append to existing buffer
+          size_t old_len = pending_buffer.len;
+          pending_buffer.data = (uint8_t*)realloc(pending_buffer.data, old_len + remaining);
+          memcpy(pending_buffer.data + old_len, data_offset, remaining);
+          pending_buffer.len = old_len + remaining;
+        }
+        
+        debug_printf("Buffered %zu bytes of pending data\n", remaining);
         break;
       }
       
       uint32_t available_space = effective_window - bytes_in_flight;
       if (payload_len > available_space) {
-        debug_printf("Not enough space: need %d, have %d available\n", payload_len, available_space);
+        debug_printf("Not enough space: need %d, have %d available, buffering data\n", 
+                     payload_len, available_space);
+        
+        // Buffer this data
+        size_t remaining = buf_len;
+        if (pending_buffer.data == NULL) {
+          pending_buffer.data = (uint8_t*)malloc(remaining);
+          pending_buffer.len = remaining;
+          pending_buffer.offset = 0;
+          memcpy(pending_buffer.data, data_offset, remaining);
+        } else {
+          size_t old_len = pending_buffer.len;
+          pending_buffer.data = (uint8_t*)realloc(pending_buffer.data, old_len + remaining);
+          memcpy(pending_buffer.data + old_len, data_offset, remaining);
+          pending_buffer.len = old_len + remaining;
+        }
         break;
       }
 
       // Create and add packet to send window
-      send_window_slot_t slot;
+      send_window_slot_extended_t slot;
       slot.is_sent = 0;
-      slot.is_rtt_sample = 0;
+      slot.is_rtt_sample = 1;  // Mark for RTT sampling
+      slot.retransmit_count = 0;
+      gettimeofday(&slot.send_time, NULL);
       slot.msg = create_packet( 
           sock->my_port, ntohs(sock->conn.sin_port),
           sock->window.last_byte_sent, sock->window.next_seq_expected,
@@ -226,11 +396,25 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
           ACK_FLAG_MASK,
           MAX(MAX_NETWORK_BUFFER - (uint32_t)sock->received_len, MSS), 0, NULL,
           data_offset, payload_len);
-      sock->send_window.push_back(slot);
+      extended_send_window.push_back(slot);
 
       buf_len -= payload_len;
       data_offset += payload_len;
       sock->window.last_byte_sent += payload_len;
+      
+      // Update pending buffer offset if we're sending from it
+      if (pending_buffer.data != NULL && data >= pending_buffer.data && 
+          data < pending_buffer.data + pending_buffer.len) {
+        pending_buffer.offset += payload_len;
+        
+        // Free buffer if we've sent everything
+        if (pending_buffer.offset >= pending_buffer.len) {
+          free(pending_buffer.data);
+          pending_buffer.data = NULL;
+          pending_buffer.len = 0;
+          pending_buffer.offset = 0;
+        }
+      }
       
       debug_printf("Added packet %d to send window, CWND=%d, RWND=%d, in_flight=%d\n", 
                    sock->window.last_byte_sent - payload_len,
@@ -243,7 +427,6 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
   transmit_send_window(sock);
 }
 
-// KEEP ALL YOUR EXISTING FUNCTIONS EXACTLY AS THEY WERE:
 void add_receive_window(foggy_socket_t *sock, uint8_t *pkt) {
   foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)pkt;
   receive_window_slot_t *cur_slot = &(sock->receive_window[0]);
@@ -273,14 +456,14 @@ void process_receive_window(foggy_socket_t *sock) {
 }
 
 void transmit_send_window(foggy_socket_t *sock) {
-  if (sock->send_window.empty()) return;
+  if (extended_send_window.empty()) return;
 
   uint32_t effective_window = MIN(sock->window.congestion_window, 
                                  sock->window.advertised_window);
 
   // Calculate bytes in flight for transmission decisions
   uint32_t bytes_in_flight = 0;
-  for (const auto& slot : sock->send_window) {
+  for (const auto& slot : extended_send_window) {
     if (slot.is_sent && !has_been_acked(sock, get_seq((foggy_tcp_header_t*)slot.msg))) {
       bytes_in_flight += get_payload_len(slot.msg);
     }
@@ -290,7 +473,7 @@ void transmit_send_window(foggy_socket_t *sock) {
                sock->window.congestion_window, sock->window.advertised_window,
                effective_window, bytes_in_flight);
 
-  for (auto& slot : sock->send_window) {
+  for (auto& slot : extended_send_window) {
     foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)slot.msg;
     uint32_t packet_seq = get_seq(hdr);
     
@@ -299,6 +482,7 @@ void transmit_send_window(foggy_socket_t *sock) {
       if (bytes_in_flight + get_payload_len(slot.msg) <= effective_window) {
         debug_printf("Sending packet %d\n", packet_seq);
         slot.is_sent = 1;
+        gettimeofday(&slot.send_time, NULL);
         sendto(sock->socket, slot.msg, get_plen(hdr), 0,
                (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
         bytes_in_flight += get_payload_len(slot.msg);
@@ -311,8 +495,8 @@ void transmit_send_window(foggy_socket_t *sock) {
 }
 
 void receive_send_window(foggy_socket_t *sock) {
-  while (!sock->send_window.empty()) {
-    send_window_slot_t slot = sock->send_window.front();
+  while (!extended_send_window.empty()) {
+    send_window_slot_extended_t slot = extended_send_window.front();
     foggy_tcp_header_t *hdr = (foggy_tcp_header_t *)slot.msg;
 
     if (!has_been_acked(sock, get_seq(hdr))) {
@@ -320,7 +504,7 @@ void receive_send_window(foggy_socket_t *sock) {
     }
     
     debug_printf("Removing ACKed packet %d\n", get_seq(hdr));
-    sock->send_window.pop_front();
+    extended_send_window.pop_front();
     free(slot.msg);
   }
 }
