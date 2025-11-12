@@ -319,4 +319,3 @@ void receive_send_window(foggy_socket_t *sock) {
 }
 
 //this is the correct one kaowkaowka
-
