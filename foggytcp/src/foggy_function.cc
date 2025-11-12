@@ -86,6 +86,7 @@ void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
       
       debug_printf("Fast recovery: SSTHRESH=%d, CWND=%d\n", 
                    sock->window.ssthresh, sock->window.congestion_window);
+      //break;
     }
   }
 }
