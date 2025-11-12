@@ -81,7 +81,7 @@ void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
       
       // CORRECT TCP RENO: Set ssthresh to max(cwnd/2, 2*MSS) and cwnd to ssthresh + 3*MSS
       sock->window.ssthresh = MAX(sock->window.congestion_window / 2, 2 * MSS);
-      sock->window.congestion_window = sock->window.ssthresh;
+      sock->window.congestion_window = sock->window.ssthresh
       sock->window.reno_state = RENO_FAST_RECOVERY;
       
       debug_printf("Fast recovery: SSTHRESH=%d, CWND=%d\n", 
@@ -174,20 +174,8 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
  * Send packets with flow and congestion control
  */
 void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
-    if (sock->window.ssthresh == 0) {
-    sock->window.ssthresh = 65535;  // Large value to allow full slow start
-    debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
-  }
-  if (sock->window.congestion_window == 0) {
-    sock->window.congestion_window = 2 * MSS;  // Start with 2 MSS (conservative)
-    sock->window.reno_state = RENO_SLOW_START; // Start in slow start
-    debug_printf("Initialized CWND to %d, state=SLOW_START\n", sock->window.congestion_window);
-  }
   uint8_t *data_offset = data;
-   if (sock->window.ssthresh == 0) {
-    sock->window.ssthresh = 65535;  // Large value to allow full slow start
-    debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
-  }
+  
   // First, process any ACKs we've received to free up window space
   receive_send_window(sock);
   
