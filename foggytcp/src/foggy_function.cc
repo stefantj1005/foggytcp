@@ -174,9 +174,14 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
  * Send packets with flow and congestion control
  */
 void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
-   if (sock->window.ssthresh == 0) {
+    if (sock->window.ssthresh == 0) {
     sock->window.ssthresh = 65535;  // Large value to allow full slow start
     debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
+  }
+  if (sock->window.congestion_window == 0) {
+    sock->window.congestion_window = 2 * MSS;  // Start with 2 MSS (conservative)
+    sock->window.reno_state = RENO_SLOW_START; // Start in slow start
+    debug_printf("Initialized CWND to %d, state=SLOW_START\n", sock->window.congestion_window);
   }
   uint8_t *data_offset = data;
    if (sock->window.ssthresh == 0) {
