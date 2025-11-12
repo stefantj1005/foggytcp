@@ -86,7 +86,7 @@ void handle_fast_retransmit(foggy_socket_t *sock, uint32_t ack) {
       
       debug_printf("Fast recovery: SSTHRESH=%d, CWND=%d\n", 
                    sock->window.ssthresh, sock->window.congestion_window);
-      break;
+      //break;
     }
   }
 }
@@ -183,6 +183,12 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
 void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len) {
   uint8_t *data_offset = data;
   
+  //iniittiitttitiititit cwnd
+  if (sock->window.congestion_window == 0) {
+    sock->window.congestion_window = 2 * MSS;  
+    sock->window.reno_state = RENO_SLOW_START;
+    debug_printf("Initialized CWND to %d\n", sock->window.congestion_window);
+  }
   // Initialize ssthresh if not already set
   if (sock->window.ssthresh == 0) {
     sock->window.ssthresh = 65535;  // Large value to allow full slow start
