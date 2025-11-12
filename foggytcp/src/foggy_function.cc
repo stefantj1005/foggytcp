@@ -120,12 +120,15 @@
         if (sock->window.dup_ack_count == DUP_ACK_THRESHOLD && sock->window.reno_state != RENO_FAST_RECOVERY) {
           debug_printf("3 duplicate ACKs detected, entering fast recovery\n");
           handle_fast_retransmit(sock, ack);
-        } else if (sock->window.dup_ack_count > DUP_ACK_THRESHOLD && 
+        } 
+        /*
+        else if (sock->window.dup_ack_count > DUP_ACK_THRESHOLD && 
                   sock->window.reno_state == RENO_FAST_RECOVERY) {
           // In fast recovery, each additional duplicate ACK increases congestion window
           sock->window.congestion_window += MSS;
           debug_printf("Fast recovery: CWND increased to %d\n", sock->window.congestion_window);
         }
+          */
       } else if (after(ack, sock->window.last_ack_received)) {
         // New ACK received
         debug_printf("New ACK received, updating last_ack from %d to %d\n", 
