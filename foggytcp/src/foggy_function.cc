@@ -184,13 +184,13 @@
     
     //iniittiitttitiititit cwnd
     if (sock->window.congestion_window == 0) {
-      sock->window.congestion_window = 100;   //change back to 2 kalo mau
+      sock->window.congestion_window = 1 * MSS;  
       sock->window.reno_state = RENO_SLOW_START;
       debug_printf("Initialized CWND to %d\n", sock->window.congestion_window);
     }
     // Initialize ssthresh if not already set
     if (sock->window.ssthresh == 0) {
-      sock->window.ssthresh = 65535;  // Large value to allow full slow start
+      sock->window.ssthresh = 21873;  // Large value to allow full slow start 65535
       debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
     }
     
