@@ -37,8 +37,7 @@
     // Normal congestion window updates
     switch (sock->window.reno_state) {
       case RENO_SLOW_START:
-        // Slow start: increase CWND by 1 MSS per ACK
-        sock->window.congestion_window += sock->window.congestion_window ;
+        sock->window.congestion_window += MSS;
         debug_printf("Slow start: CWND increased from %d to %d\n", 
                     sock->window.congestion_window - MSS, sock->window.congestion_window);
         
@@ -185,7 +184,7 @@
     
     //iniittiitttitiititit cwnd
     if (sock->window.congestion_window == 0) {
-      sock->window.congestion_window = 2 * MSS;  
+      sock->window.congestion_window = 1 * MSS;   //change back to 2 kalo mau
       sock->window.reno_state = RENO_SLOW_START;
       debug_printf("Initialized CWND to %d\n", sock->window.congestion_window);
     }
