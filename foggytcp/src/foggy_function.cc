@@ -190,7 +190,7 @@
     }
     // Initialize ssthresh if not already set
     if (sock->window.ssthresh == 0) {
-      sock->window.ssthresh = 21873;  // Large value to allow full slow start 65535
+      sock->window.ssthresh = 4*MSS;  // Large value to allow full slow start 65535
       debug_printf("Initialized SSTHRESH to %d\n", sock->window.ssthresh);
     }
     
