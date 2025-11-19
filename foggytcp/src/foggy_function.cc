@@ -1,4 +1,4 @@
-#include <deque>
+  #include <deque>
   #include <cstdlib>
   #include <cstring>
   #include <cstdio>
@@ -37,24 +37,18 @@
     // Normal congestion window updates
     switch (sock->window.reno_state) {
       case RENO_SLOW_START:
-  // Alternative: 1.1× growth per RTT (but test might fail)
-  uint32_t old_cwnd = sock->window.congestion_window;
-  sock->window.congestion_window = (old_cwnd * 11) / 10;
-  
-  // Ensure we grow by at least 1 byte
-  if (sock->window.congestion_window <= old_cwnd) {
-    sock->window.congestion_window = old_cwnd + 1;
-  }
-  
-  debug_printf("Slow start: CWND increased from %d to %d (1.1× growth)\n", 
-              old_cwnd, sock->window.congestion_window);
-  
-  if (sock->window.congestion_window >= sock->window.ssthresh) {
-    sock->window.reno_state = RENO_CONGESTION_AVOIDANCE;
-    debug_printf("Transition to congestion avoidance, CWND=%d >= SSTHRESH=%d\n",
-                sock->window.congestion_window, sock->window.ssthresh);
-  }
-  break;
+        // Slow start: increase CWND by 1 MSS per ACK
+        sock->window.congestion_window += 1;
+        debug_printf("Slow start: CWND increased from %d to %d\n", 
+                    sock->window.congestion_window - MSS, sock->window.congestion_window);
+        
+        // Check if we should transition to congestion avoidance NGENTOTTHIGUIGYSGE
+        if (sock->window.congestion_window >= sock->window.ssthresh) {
+          sock->window.reno_state = RENO_CONGESTION_AVOIDANCE;
+          debug_printf("Transition to congestion avoidance, CWND=%d >= SSTHRESH=%d\n",
+                      sock->window.congestion_window, sock->window.ssthresh);
+        }
+        break;
         
       case RENO_CONGESTION_AVOIDANCE:
         // Congestion avoidance: increase CWND by (MSS * MSS) / CWND per ACK
@@ -341,3 +335,5 @@
       free(slot.msg);
     }
   }
+
+  // this is the correct version 
