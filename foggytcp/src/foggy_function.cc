@@ -1,4 +1,4 @@
-  #include <deque>
+#include <deque>
   #include <cstdlib>
   #include <cstring>
   #include <cstdio>
@@ -37,10 +37,17 @@
     // Normal congestion window updates
     switch (sock->window.reno_state) {
       case RENO_SLOW_START:
-        // Slow start: increase CWND by 1 MSS per ACK
-        sock->window.congestion_window += MSS/10;
-        debug_printf("Slow start: CWND increased from %d to %d\n", 
-                    sock->window.congestion_window - MSS, sock->window.congestion_window);
+        // Less aggressive slow start: increase CWND by 10% (1.1x)
+        {
+          uint32_t old_cwnd = sock->window.congestion_window;
+          sock->window.congestion_window = (uint32_t)((double)sock->window.congestion_window * 1.1);
+          // Ensure we make at least some progress (minimum increase of 1 MSS)
+          if (sock->window.congestion_window == old_cwnd) {
+            sock->window.congestion_window += MSS;
+          }
+          debug_printf("Slow start: CWND increased from %d to %d (1.1x growth)\n", 
+                      old_cwnd, sock->window.congestion_window);
+        }
         
         // Check if we should transition to congestion avoidance
         if (sock->window.congestion_window >= sock->window.ssthresh) {
@@ -335,5 +342,3 @@
       free(slot.msg);
     }
   }
-
-  // this is the correct version 
