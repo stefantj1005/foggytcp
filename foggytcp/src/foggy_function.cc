@@ -38,7 +38,7 @@
     switch (sock->window.reno_state) {
       case RENO_SLOW_START:
         // Slow start: increase CWND by 1 MSS per ACK
-        sock->window.congestion_window += MSS/2;
+        sock->window.congestion_window += sock->window.congestion_window ;
         debug_printf("Slow start: CWND increased from %d to %d\n", 
                     sock->window.congestion_window - MSS, sock->window.congestion_window);
         
