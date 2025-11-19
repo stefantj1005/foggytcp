@@ -184,7 +184,7 @@
     
     //iniittiitttitiititit cwnd
     if (sock->window.congestion_window == 0) {
-      sock->window.congestion_window = 1 * MSS;   //change back to 2 kalo mau
+      sock->window.congestion_window = 100;   //change back to 2 kalo mau
       sock->window.reno_state = RENO_SLOW_START;
       debug_printf("Initialized CWND to %d\n", sock->window.congestion_window);
     }
