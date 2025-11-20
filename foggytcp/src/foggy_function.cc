@@ -72,7 +72,7 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt) {
         printf("SLOW_START: CWND increased to %u\n", sock->window.congestion_window);
         
         // Transition to congestion avoidance when CWND >= ssthresh
-        if (sock->window.congestion_window >= sock->window.ssthresh*1.5) {
+        if (sock->window.congestion_window >= 9600) { //sock->window.ssthresh
           sock->window.reno_state = RENO_CONGESTION_AVOIDANCE;
           printf("Transition to CONGESTION_AVOIDANCE\n");
         }
